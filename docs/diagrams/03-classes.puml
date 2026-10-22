@@ -1,0 +1,182 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 13
+skinparam classAttributeIconSize 0
+hide empty members
+title Вариант 1 — классы модели сервиса WebP
+class Simulation {
+ - now: double
+ - sources: Source[]
+ - buffer: RingBuffer
+ - devices: DevicePool
+ - admission: AdmissionDispatcher
+ - selection: SelectionDispatcher
+ - calendar: EventCalendar
+ - stats: Statistics
+ + initialize(config: Config): void
+ + step(): Snapshot
+ + run(until: double): Metrics
+}
+class Config {
+ + sourceRates: double[]
+ + deviceCount: int
+ + bufferCapacity: int
+ + tmin: double
+ + tmax: double
+ + seed: long
+ + validate(): void
+}
+class Source {
+ - id: int
+ - lambda: double
+ - rng: RandomStream
+ + generate(now: double): Request
+ + nextArrival(now: double): double
+ + notifyRejected(q: Request, reason: string): void
+ + notifyCompleted(q: Request, resultUri: string): void
+}
+class Request {
+ + {readOnly} requestId: long
+ + {readOnly} sourceId: int
+ + {readOnly} imageUri: string
+ + {readOnly} arrivalAt: double
+}
+class RingBuffer {
+ - slots: Request[0..B-1]
+ - pointer: int
+ - count: int
+ + offer(q: Request): OfferResult
+ + pollOldest(): Request?
+ + isEmpty(): bool
+ + snapshot(): BufferState
+}
+class OfferResult {
+ + {readOnly} slot: int
+ + {readOnly} evicted: Request?
+}
+class AdmissionDispatcher {
+ - buffer: RingBuffer
+ - selection: SelectionDispatcher
+ - sources: Source[]
+ - stats: Statistics
+ + accept(q: Request, now: double): void
+}
+class SelectionDispatcher {
+ - buffer: RingBuffer
+ - devices: DevicePool
+ - calendar: EventCalendar
+ - stats: Statistics
+ + findFreeDevice(): Device?
+ + startOn(q: Request, d: Device, now: double): void
+ + dispatchWaiting(now: double): void
+}
+class DevicePool {
+ - devices: Device[]
+ + firstFree(): Device?
+ + start(d: Device, q: Request, now: double): double
+ + finish(deviceId: int, now: double): CompletionResult
+ + snapshot(): DeviceState[]
+}
+class Device {
+ - id: int
+ - current: Request?
+ - finishAt: double?
+ - tmin: double
+ - tmax: double
+ - rng: RandomStream
+ + isFree(): bool
+ + start(q: Request, now: double): double
+ + finish(now: double): CompletionResult
+}
+class CompletionResult {
+ + {readOnly} request: Request
+ + {readOnly} resultUri: string
+}
+class EventCalendar {
+ - events: PriorityQueue<Event>
+ + schedule(kind: EventKind, time: double, targetId: int): void
+ + popNext(): Event
+ + snapshot(): Event[]
+}
+class Event {
+ + {readOnly} time: double
+ + {readOnly} kind: EventKind
+ + {readOnly} targetId: int
+}
+enum EventKind {
+ COMPLETION
+ ARRIVAL
+}
+class RandomStream {
+ - state: long
+ + uniformOpen01(): double
+ + exponential(lambda: double): double
+ + uniform(a: double, b: double): double
+}
+class Statistics {
+ - arrivedBySource: long[]
+ - rejectedBySource: long[]
+ - completedBySource: long[]
+ - busyAreaByDevice: double[]
+ - queueArea: double
+ - totalSojournCompleted: double
+ - lastTime: double
+ - journal: JournalEntry[]
+ + advanceTo(t: double, busy: DeviceState[], queued: int): void
+ + recordArrival(q: Request): void
+ + recordEnqueue(q: Request, slot: int, t: double, p: int): void
+ + recordRejection(q: Request, t: double): void
+ + recordDequeue(q: Request, t: double): void
+ + recordStart(q: Request, d: Device, t: double): void
+ + recordCompletion(q: Request, d: Device, t: double): void
+ + snapshot(t: double, calendar: EventCalendar, buffer: RingBuffer, devices: DevicePool): Snapshot
+ + metrics(t: double): Metrics
+}
+Simulation *-- "N" Source
+Simulation *-- RingBuffer
+Simulation *-- DevicePool
+Simulation *-- AdmissionDispatcher
+Simulation *-- SelectionDispatcher
+Simulation *-- EventCalendar
+Simulation *-- Statistics
+Simulation ..> Config
+AdmissionDispatcher --> RingBuffer : buffer
+AdmissionDispatcher --> SelectionDispatcher : selection
+AdmissionDispatcher --> "N" Source : sources
+AdmissionDispatcher --> Statistics : stats
+SelectionDispatcher --> RingBuffer : buffer
+SelectionDispatcher --> DevicePool : devices
+SelectionDispatcher --> EventCalendar : calendar
+SelectionDispatcher --> Statistics : stats
+DevicePool *-- "M" Device : devices
+Device --> "0..1" Request : current
+RingBuffer --> "0..B" Request : slots
+RingBuffer ..> OfferResult
+OfferResult --> "0..1" Request : evicted
+Device ..> CompletionResult
+CompletionResult --> Request
+EventCalendar *-- "0..*" Event
+Event --> EventKind
+Source *-- RandomStream : rng
+Device *-- RandomStream : rng
+Source ..> Request : создаёт
+note bottom of RingBuffer
+Д10З1: кольцевой поиск от pointer.
+Д10О1: при полном буфере заменить slots[pointer].
+После записи pointer = (slot + 1) mod B.
+Д2Б1: минимум (arrivalAt, requestId), без сдвига pointer.
+end note
+note bottom of DevicePool
+Д2П1: firstFree() проверяет номера от 1 до M.
+ПЗ2: Device.start() возвращает now + U[tmin;tmax].
+Пул делегирует start/finish выбранному Device.
+end note
+note bottom of Statistics
+Snapshot, BufferState, DeviceState, Metrics и JournalEntry —
+структуры отображения ОД1 и результатов ОР2.
+При отказе учитывается sourceId вытесненной заявки.
+end note
+@enduml

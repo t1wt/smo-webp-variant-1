@@ -1,0 +1,92 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam sequenceMessageAlign left
+skinparam maxMessageSize 240
+hide footbox
+
+title Вариант 1 — поступление и обслуживание задания WebP
+participant "Источник Ii" as I
+control "Модель" as S
+collections "Календарь событий" as C
+control "Диспетчер постановки" as A
+control "Диспетчер выбора" as D
+collections "Кольцевой буфер" as B
+participant "Пул IMG-1 … IMG-M" as P
+participant "Статистика" as T
+
+note over I,C
+ИБ: N независимых бесконечных источников.
+ИЗ1: интервал Δt = −ln(U)/λi, U ∈ (0;1).
+Календарь: сначала завершения, затем поступления;
+внутри типа — номер прибора / источника.
+end note
+loop Пока календарь содержит события до конца наблюдения
+ S -> C: popNext()
+ C --> S: событие e с минимальным временем
+ S -> T: advanceTo(e.time, число занятых, размер буфера)
+ note right of T: Интегралы состояния до изменения системы
+ alt e.kind = ARRIVAL
+  S -> I: generate(e.time)
+  I --> S: новая заявка q
+  S -> T: recordArrival(q)
+  S -> I: nextArrival(e.time)
+  I --> S: tNext (ИЗ1)
+  S -> C: schedule(ARRIVAL, tNext, sourceId)
+  S -> A: accept(q, e.time)
+  A -> D: findFreeDevice()
+  D -> P: firstFree()
+  P --> D: свободный d с минимальным номером или null
+  D --> A: d или null (Д2П1)
+  alt d найден — счастливый путь, буфер пуст
+   note over A,B: Буфер пуст по инварианту немедленной выборки.
+   A -> D: startOn(q, d, e.time)
+   D -> P: start(d, q, e.time)
+   P --> D: finishAt = e.time + τ, τ ∼ U[tmin;tmax] (ПЗ2)
+   D -> T: recordStart(q, d, e.time)
+   D -> C: schedule(COMPLETION, finishAt, deviceId)
+  else все приборы заняты
+   A -> B: offer(q)
+   loop Проверить не более B позиций, начиная с p
+    B -> B: проверить slots[p]; занято — p = (p + 1) mod B
+   end
+   alt найдено свободное место k — Д10З1
+    B -> B: slots[k] = q; p = (k + 1) mod B
+    B --> A: OfferResult(k, evicted = null)
+   else полный обход — Д10О1, p вернулся в исходную позицию
+    B -> B: k = p; old = slots[k]; slots[k] = q; p = (p + 1) mod B
+    B --> A: OfferResult(k, evicted = old)
+    A -> T: recordRejection(old, e.time)
+    A -> I: notifyRejected(old, 503 OVERLOAD)
+    note over A,I: Уведомляется источник old.sourceId, а не новой q.
+   end
+   A -> T: recordEnqueue(q, k, e.time, p)
+  end
+ else e.kind = COMPLETION
+  S -> P: finish(e.targetId, e.time)
+  P --> S: завершённая заявка q, resultUri; прибор свободен
+  note right of P: Результат WebP сохранён до завершения.
+  S -> T: recordCompletion(q, e.targetId, e.time)
+  S -> I: notifyCompleted(q, resultUri)
+  S -> D: dispatchWaiting(e.time)
+  loop Пока в буфере есть заявки и есть свободный прибор
+   D -> P: firstFree()
+   P --> D: d с минимальным номером (Д2П1)
+   D -> B: pollOldest()
+   B -> B: выбрать min(arrivalAt, requestId) по всем занятым ячейкам
+   B --> D: oldest; ячейка освобождена; p не изменён (Д2Б1)
+   D -> T: recordDequeue(oldest, e.time)
+   D -> D: startOn(oldest, d, e.time)
+   D -> P: start(d, oldest, e.time)
+   P --> D: finishAt = e.time + τ (ПЗ2)
+   D -> T: recordStart(oldest, d, e.time)
+   D -> C: schedule(COMPLETION, finishAt, d.id)
+  end
+  note over D,P: Если буфер пуст, прибор остаётся свободным.
+ end
+ S -> T: snapshot(e.time, календарь, буфер, p, приборы)
+ T --> S: состояние ОД1 и текущие показатели
+end
+@enduml

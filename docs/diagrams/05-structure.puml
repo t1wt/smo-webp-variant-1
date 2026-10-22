@@ -1,0 +1,24 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+left to right direction
+title Вариант 1 — формализованная схема вычислительной системы
+rectangle "N бесконечных источников\nЗагрузка товаров, импорт, CMS\nИБ, ИЗ1: пуассоновские потоки λi" as I
+rectangle "Image API\nДиспетчер постановки" as A
+queue "Общий буфер B ячеек\nД10З1: запись по кольцу\nД10О1: отказ под указателем" as B
+rectangle "Диспетчер выбора\nД2Б1: FIFO\nД2П1: меньший номер прибора" as D
+rectangle "M вычислительных узлов\nIMG-1 … IMG-M\nПЗ2: U[tmin;tmax]" as P
+rectangle "Выход\nМиниатюра 800×800 WebP" as O
+rectangle "Отказ вытесненной заявки\n503 OVERLOAD" as R
+I --> A : задание
+A --> B : все приборы заняты
+A --> D : свободный прибор\nпрямая передача
+B --> D : старейшая заявка
+D --> P : начало обслуживания
+P --> D : освобождение прибора
+P --> O : результат
+B --> R : полный буфер
+@enduml
