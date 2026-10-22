@@ -13,27 +13,32 @@ control "Модель" as S
 control "Диспетчер постановки" as A
 control "Диспетчер выбора" as D
 collections "Буфер B = 3" as B
-participant "IMG-1" as P
+participant "Пул приборов (M = 1)" as P
 collections "Календарь" as C
 participant "Статистика" as T
 note over S,T
-Иллюстрация состояния, а не результаты моделирования.
+Начальное состояние примера:
 M = 1; IMG-1 занят заявкой q0 до t = 5.
 Буфер: [q2(t=2), q1(t=1), q3(t=3)]; p = 0.
 Все заявки примера поступают от I1.
 end note
+S -> T: snapshot(3, calendar, buffer, devices)
+T --> S: state: Snapshot
 == t = 4 — поступила q4 ==
-S -> I: generate(4)
+S -> C: popNext()
+C --> S: ARRIVAL(4, I1)
+S -> T: advanceTo(4, state.devices, state.buffer.count)
+S -> I: generate(4, 4)
 I --> S: q4
-S -> T: advanceTo(4, 1, 3)
 S -> T: recordArrival(q4)
+S -> S: generated++; generated < requestLimit
 S -> I: nextArrival(4)
 I --> S: tNext > 5 (ИЗ1)
 S -> C: schedule(ARRIVAL, tNext, I1)
 S -> A: accept(q4, 4)
 A -> D: findFreeDevice()
-D -> P: isFree()
-P --> D: false
+D -> P: firstFree()
+P --> D: null
 D --> A: null (Д2П1)
 A -> B: offer(q4)
 B -> B: проверить 0 → 1 → 2 → 0: свободных мест нет
@@ -41,28 +46,32 @@ B -> B: Д10О1: вытеснить q2 из slots[0]; записать q4
 B -> B: p = (0 + 1) mod 3 = 1
 B --> A: OfferResult(0, q2)
 A -> T: recordRejection(q2, 4)
-A -> I: notifyRejected(q2, 503 OVERLOAD)
+A -> I: notifyRejected(q2, "503 OVERLOAD")
 A -> T: recordEnqueue(q4, 0, 4, 1)
 note over B,P: [q4(t=4), q1(t=1), q3(t=3)]; p=1.\nq0 продолжает обслуживаться без прерывания.
+S -> T: snapshot(4, calendar, buffer, devices)
+T --> S: state: Snapshot
 == t = 5 — завершилась q0 ==
 S -> C: popNext()
 C --> S: COMPLETION(5, IMG-1)
-S -> T: advanceTo(5, 1, 3)
+S -> T: advanceTo(5, state.devices, state.buffer.count)
 S -> P: finish(1, 5)
 P --> S: q0, resultUri; прибор свободен
 S -> T: recordCompletion(q0, 1, 5)
 S -> I: notifyCompleted(q0, resultUri)
 S -> D: dispatchWaiting(5)
-D -> P: isFree()
-P --> D: true
+D -> P: firstFree()
+P --> D: d = IMG-1 (Д2П1)
 D -> B: pollOldest()
 B -> B: Д2Б1: min(arrivalAt, requestId) = q1
 B --> D: q1; slots[1] = null; p = 1
 D -> T: recordDequeue(q1, 5)
 D -> D: startOn(q1, IMG-1, 5)
-D -> P: start(q1, 5)
+D -> P: start(d, q1, 5)
 P --> D: finishAt = 5 + τ, τ ∼ U[tmin;tmax] (ПЗ2)
 D -> T: recordStart(q1, 1, 5)
 D -> C: schedule(COMPLETION, finishAt, 1)
 note over B,P: [q4, пусто, q3]; p=1. IMG-1 занят q1.\nВытеснена q2 под указателем, хотя старейшей была q1.
+S -> T: snapshot(5, calendar, buffer, devices)
+T --> S: state: Snapshot
 @enduml

@@ -23,30 +23,40 @@ note over I,C
 Календарь: сначала завершения, затем поступления;
 внутри типа — номер прибора / источника.
 end note
-loop Пока календарь содержит события до конца наблюдения
+S -> S: initialize(config); generated = 0; nextRequestId = 0
+note over S,C: Первые поступления источников запланированы по ИЗ1.
+S -> T: snapshot(0, calendar, buffer, devices)
+T --> S: state: Snapshot
+loop Пока календарь не пуст
  S -> C: popNext()
  C --> S: событие e с минимальным временем
- S -> T: advanceTo(e.time, число занятых, размер буфера)
+ S -> T: advanceTo(e.time, state.devices, state.buffer.count)
  note right of T: Интегралы состояния до изменения системы
  alt e.kind = ARRIVAL
-  S -> I: generate(e.time)
+  S -> I: generate(nextRequestId++, e.time)
   I --> S: новая заявка q
   S -> T: recordArrival(q)
-  S -> I: nextArrival(e.time)
-  I --> S: tNext (ИЗ1)
-  S -> C: schedule(ARRIVAL, tNext, sourceId)
+  S -> S: generated = generated + 1
+  alt generated = requestLimit
+   S -> C: stopArrivals()
+   note right of C: Удалить будущие поступления; завершения оставить.
+  else generated < requestLimit
+   S -> I: nextArrival(e.time)
+   I --> S: tNext (ИЗ1)
+   S -> C: schedule(ARRIVAL, tNext, q.sourceId)
+  end
   S -> A: accept(q, e.time)
   A -> D: findFreeDevice()
   D -> P: firstFree()
   P --> D: свободный d с минимальным номером или null
   D --> A: d или null (Д2П1)
-  alt d найден — счастливый путь, буфер пуст
-   note over A,B: Буфер пуст по инварианту немедленной выборки.
+  alt d найден, буфер пуст
+   note over A,B: При освобождении прибора ожидающая заявка сразу уходит на обслуживание.
    A -> D: startOn(q, d, e.time)
    D -> P: start(d, q, e.time)
    P --> D: finishAt = e.time + τ, τ ∼ U[tmin;tmax] (ПЗ2)
-   D -> T: recordStart(q, d, e.time)
-   D -> C: schedule(COMPLETION, finishAt, deviceId)
+   D -> T: recordStart(q, d.getId(), e.time)
+   D -> C: schedule(COMPLETION, finishAt, d.getId())
   else все приборы заняты
    A -> B: offer(q)
    loop Проверить не более B позиций, начиная с p
@@ -59,8 +69,8 @@ loop Пока календарь содержит события до конца
     B -> B: k = p; old = slots[k]; slots[k] = q; p = (p + 1) mod B
     B --> A: OfferResult(k, evicted = old)
     A -> T: recordRejection(old, e.time)
-    A -> I: notifyRejected(old, 503 OVERLOAD)
-    note over A,I: Уведомляется источник old.sourceId, а не новой q.
+    A -> I: notifyRejected(old, "503 OVERLOAD")
+    note over A,I: Получатель отказа — источник old.sourceId.
    end
    A -> T: recordEnqueue(q, k, e.time, p)
   end
@@ -81,12 +91,14 @@ loop Пока календарь содержит события до конца
    D -> D: startOn(oldest, d, e.time)
    D -> P: start(d, oldest, e.time)
    P --> D: finishAt = e.time + τ (ПЗ2)
-   D -> T: recordStart(oldest, d, e.time)
-   D -> C: schedule(COMPLETION, finishAt, d.id)
+   D -> T: recordStart(oldest, d.getId(), e.time)
+   D -> C: schedule(COMPLETION, finishAt, d.getId())
   end
   note over D,P: Если буфер пуст, прибор остаётся свободным.
  end
- S -> T: snapshot(e.time, календарь, буфер, p, приборы)
- T --> S: состояние ОД1 и текущие показатели
+ S -> T: snapshot(e.time, calendar, buffer, devices)
+ T --> S: state: Snapshot (календарь, буфер, p, приборы, показатели)
 end
+S -> T: metrics(e.time)
+T --> S: показатели источников и приборов за полное время реализации
 @enduml

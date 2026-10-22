@@ -9,6 +9,9 @@ hide empty members
 title Вариант 1 — классы модели сервиса WebP
 class Simulation {
  - now: double
+ - generated: long
+ - nextRequestId: long
+ - requestLimit: long
  - sources: Source[]
  - buffer: RingBuffer
  - devices: DevicePool
@@ -18,7 +21,13 @@ class Simulation {
  - stats: Statistics
  + initialize(config: Config): void
  + step(): Snapshot
- + run(until: double): Metrics
+ + run(requestLimit: long): Metrics
+}
+class ExperimentRunner {
+ - model: Simulation
+ + runAutomatic(config: Config): Metrics
+ + estimateRequired(p: double): long
+ + runSeries(configs: Config[]): Metrics[]
 }
 class Config {
  + sourceRates: double[]
@@ -27,13 +36,14 @@ class Config {
  + tmin: double
  + tmax: double
  + seed: long
+ + requestLimit: long
  + validate(): void
 }
 class Source {
  - id: int
  - lambda: double
  - rng: RandomStream
- + generate(now: double): Request
+ + generate(requestId: long, now: double): Request
  + nextArrival(now: double): double
  + notifyRejected(q: Request, reason: string): void
  + notifyCompleted(q: Request, resultUri: string): void
@@ -87,6 +97,7 @@ class Device {
  - tmin: double
  - tmax: double
  - rng: RandomStream
+ + getId(): int
  + isFree(): bool
  + start(q: Request, now: double): double
  + finish(now: double): CompletionResult
@@ -98,6 +109,8 @@ class CompletionResult {
 class EventCalendar {
  - events: PriorityQueue<Event>
  + schedule(kind: EventKind, time: double, targetId: int): void
+ + stopArrivals(): void
+ + isEmpty(): bool
  + popNext(): Event
  + snapshot(): Event[]
 }
@@ -122,7 +135,12 @@ class Statistics {
  - completedBySource: long[]
  - busyAreaByDevice: double[]
  - queueArea: double
- - totalSojournCompleted: double
+ - startTimes: Map<long, double>
+ - waitSumBySource: double[]
+ - waitSquareSumBySource: double[]
+ - serviceSumBySource: double[]
+ - serviceSquareSumBySource: double[]
+ - sojournSumBySource: double[]
  - lastTime: double
  - journal: JournalEntry[]
  + advanceTo(t: double, busy: DeviceState[], queued: int): void
@@ -130,8 +148,8 @@ class Statistics {
  + recordEnqueue(q: Request, slot: int, t: double, p: int): void
  + recordRejection(q: Request, t: double): void
  + recordDequeue(q: Request, t: double): void
- + recordStart(q: Request, d: Device, t: double): void
- + recordCompletion(q: Request, d: Device, t: double): void
+ + recordStart(q: Request, deviceId: int, t: double): void
+ + recordCompletion(q: Request, deviceId: int, t: double): void
  + snapshot(t: double, calendar: EventCalendar, buffer: RingBuffer, devices: DevicePool): Snapshot
  + metrics(t: double): Metrics
 }
@@ -143,6 +161,8 @@ Simulation *-- SelectionDispatcher
 Simulation *-- EventCalendar
 Simulation *-- Statistics
 Simulation ..> Config
+ExperimentRunner --> Simulation : model
+ExperimentRunner ..> Config
 AdmissionDispatcher --> RingBuffer : buffer
 AdmissionDispatcher --> SelectionDispatcher : selection
 AdmissionDispatcher --> "N" Source : sources
@@ -175,8 +195,9 @@ note bottom of DevicePool
 Пул делегирует start/finish выбранному Device.
 end note
 note bottom of Statistics
-Snapshot, BufferState, DeviceState, Metrics и JournalEntry —
-структуры отображения ОД1 и результатов ОР2.
+По источникам: число заявок, pотк, Tпреб,
+TБП, Tобсл, ДБП, Добсл.
+По приборам: Kисп,i.
 При отказе учитывается sourceId вытесненной заявки.
 end note
 @enduml
