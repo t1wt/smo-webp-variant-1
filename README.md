@@ -40,3 +40,5 @@
 
 - [Бизнес-домен](docs/source/business-domain.docx).
 - [Маппинг](docs/source/mapping.docx).
+
+Программа: [main.py](main.py)
